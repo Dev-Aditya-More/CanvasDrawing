@@ -1,97 +1,66 @@
 package com.example.canvasdrawing
 
+import android.content.ContentValues
+import android.content.Context
+import android.content.Intent
 import android.graphics.Bitmap
-import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.background
-import androidx.compose.foundation.gestures.detectDragGestures
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.Button
-import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
+import android.net.Uri
+import android.os.Environment
+import android.provider.MediaStore
+import android.widget.Toast
 import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.unit.dp
-
-@Composable
-fun DrawingApp() {
-    var path by remember { mutableStateOf(Path()) }
-    var currentBitmap by remember { mutableStateOf<Bitmap?>(null) }
-    val context = LocalContext.current
-
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Color.White)
-            .padding(16.dp)
-    ) {
-        Canvas(
-            modifier = Modifier
-                .weight(1f)
-                .fillMaxSize()
-                .pointerInput(Unit) {
-                    detectDragGestures(
-                        onDragStart = { path.moveTo(it.x, it.y) },
-                        onDrag = { change, _ ->
-                            path.lineTo(change.position.x, change.position.y)
-                        }
-                    )
-                }
-        ) {
+import androidx.compose.ui.graphics.asAndroidPath
+import androidx.core.content.FileProvider
+import androidx.core.graphics.createBitmap
+import androidx.core.net.toUri
+import java.io.File
+import java.io.FileOutputStream
+import java.io.OutputStream
 
 
-            drawPath(
-                path = path,
-                color = Color.Black,
-                style = Stroke(width = 5f) // ✅ Set stroke width properly
-            )
-
-        }
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceEvenly
-        ) {
-            Button(
-                onClick = {
-                    path = Path() // Clear drawing
-                },
-                shape = RoundedCornerShape(10.dp)
-            ) {
-                Text("Clear")
-            }
-
-            Button(
-                onClick = {
-                    currentBitmap = captureCanvasBitmap(path)
-                    saveImageToGallery(currentBitmap!!, context)
-                },
-                shape = RoundedCornerShape(10.dp)
-            ) {
-                Text("Save")
-            }
-
-            Button(
-                onClick = {
-                    currentBitmap?.let { shareImage(context, it) }
-                },
-                shape = RoundedCornerShape(10.dp)
-            ) {
-                Text("Share")
-            }
-        }
+fun saveImageToGallery(context: Context, bitmap: Bitmap) {
+    val filename = "Drawing_${System.currentTimeMillis()}.png"
+    val contentValues = ContentValues().apply {
+        put(MediaStore.Images.Media.DISPLAY_NAME, filename)
+        put(MediaStore.Images.Media.MIME_TYPE, "image/png")
+        put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/DrawingApp")
+        put(MediaStore.Images.Media.IS_PENDING, 1)
     }
+
+    val resolver = context.contentResolver
+    val uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, contentValues)
+
+    uri?.let {
+        val stream = resolver.openOutputStream(it)
+        stream?.use { bitmap.compress(Bitmap.CompressFormat.PNG, 100, it) }
+
+        contentValues.clear()
+        contentValues.put(MediaStore.Images.Media.IS_PENDING, 0)
+        resolver.update(uri, contentValues, null, null)
+
+        Toast.makeText(context, "Saved to Gallery!", Toast.LENGTH_SHORT).show()
+    }
+}
+
+
+fun shareImage(context: Context, bitmap: Bitmap) {
+    val file = File(context.cacheDir, "shared_drawing.png")
+    val out = FileOutputStream(file)
+    bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
+    out.flush()
+    out.close()
+
+    val uri: Uri = FileProvider.getUriForFile(
+        context,
+        "${context.packageName}.fileprovider",
+        file
+    )
+
+    val intent = Intent(Intent.ACTION_SEND).apply {
+        type = "image/png"
+        putExtra(Intent.EXTRA_STREAM, uri)
+        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    }
+
+    context.startActivity(Intent.createChooser(intent, "Share via"))
 }
